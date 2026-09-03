@@ -1,0 +1,93 @@
+name: Bug report
+description: Report reproducible behavior that appears incorrect in Kolchak.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Kolchak. Please search existing issues first and remove secrets or private data from everything you share.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence of commands, inputs, or files that reproduces the problem.
+      placeholder: |
+        1. Run `kolchak ...`
+        2. Use this configuration or case file...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What did you expect Kolchak to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: What did Kolchak do instead? Include exact error text when useful.
+    validations:
+      required: true
+
+  - type: input
+    id: kolchak-version
+    attributes:
+      label: Kolchak version or commit
+      description: Provide a release version or the output of `git rev-parse --short HEAD`.
+      placeholder: v0.1.0 or 4e53460
+    validations:
+      required: true
+
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.6, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Provide the output of `go version` when building from source.
+      placeholder: go version go1.25.1 darwin/arm64
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Share the smallest relevant `kolchak.yaml` excerpt. Remove credentials, tokens, private URLs, and sensitive data.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output or logs
+      description: Paste focused output that helps explain the failure. Remove secrets and private data.
+      render: shell
+
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Sensitive information
+      options:
+        - label: I have removed credentials, tokens, private URLs, and other sensitive information.
+          required: true
+
