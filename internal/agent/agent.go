@@ -4,7 +4,7 @@ import "context"
 
 // Request is the transport-neutral work an adapter sends to an agent.
 type Request struct {
-	Task string
+	Task string `json:"task"`
 }
 
 // Input is retained as an alias while the engine migrates to Request.
@@ -12,14 +12,14 @@ type Input = Request
 
 // Result is the transport-neutral outcome returned by an agent.
 type Result struct {
-	Events []Event
-	Output string
+	Events []Event `json:"events"`
+	Output string  `json:"output"`
 }
 
 // Event records an observable action emitted while an agent runs.
 type Event struct {
-	Type string
-	Data map[string]any
+	Type string         `json:"type"`
+	Data map[string]any `json:"data"`
 }
 
 // Agent runs one request through an implementation-specific adapter.
