@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,19 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+type readSignalBody struct {
+	io.ReadCloser
+	readStarted chan<- struct{}
+}
+
+func (b *readSignalBody) Read(p []byte) (int, error) {
+	select {
+	case b.readStarted <- struct{}{}:
+	default:
+	}
+	return b.ReadCloser.Read(p)
 }
 
 func TestNewRejectsInvalidEndpoint(t *testing.T) {
@@ -107,6 +121,52 @@ func TestRunRejectsNon2xxResponseWithoutBody(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret infrastructure detail") {
 		t.Errorf("Run() error = %q, must not contain response body", err)
+	}
+}
+
+func TestRunRejectsRedirectWithoutReplayingPost(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		statusText string
+	}{
+		{name: "temporary", statusCode: http.StatusTemporaryRedirect, statusText: "307"},
+		{name: "permanent", statusCode: http.StatusPermanentRedirect, statusText: "308"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			redirectTargetRequests := make(chan *http.Request, 1)
+			redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				redirectTargetRequests <- r
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer redirectTarget.Close()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", redirectTarget.URL)
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			adapter, err := New(server.URL, nil)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			_, err = adapter.Run(context.Background(), agent.Request{Task: "do not replay"})
+			kind, ok := agent.FailureKindOf(err)
+			if !ok || kind != agent.FailureRejected {
+				t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureRejected)
+			}
+			if !strings.Contains(err.Error(), tt.statusText) {
+				t.Errorf("Run() error = %q, want original redirect status", err)
+			}
+			select {
+			case request := <-redirectTargetRequests:
+				t.Fatalf("redirect target received replayed %s request", request.Method)
+			case <-time.After(100 * time.Millisecond):
+			}
+		})
 	}
 }
 
@@ -210,6 +270,48 @@ func TestRunPreservesCancellation(t *testing.T) {
 	}
 }
 
+func TestRunPreservesCancellationDuringResponseBodyRead(t *testing.T) {
+	headersFlushed := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		close(headersFlushed)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	bodyReadStarted := make(chan struct{}, 1)
+	client := &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := http.DefaultTransport.RoundTrip(request)
+		if err == nil {
+			response.Body = &readSignalBody{ReadCloser: response.Body, readStarted: bodyReadStarted}
+		}
+		return response, err
+	})}
+
+	adapter, err := New(server.URL, client)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errs := make(chan error, 1)
+	go func() {
+		_, err := adapter.Run(ctx, agent.Request{})
+		errs <- err
+	}()
+	<-headersFlushed
+	<-bodyReadStarted
+	cancel()
+	err = <-errs
+	if !errors.Is(err, ctx.Err()) {
+		t.Fatalf("errors.Is(Run() error, ctx.Err()) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
+	}
+}
+
 func TestRunPreservesDeadline(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -228,15 +330,25 @@ func TestRunPreservesDeadline(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	errs := make(chan error, 1)
 	go func() {
 		_, err := adapter.Run(ctx, agent.Request{})
 		errs <- err
 	}()
-	<-started
-	err = <-errs
+	select {
+	case <-started:
+	case err := <-errs:
+		t.Fatalf("Run() returned before handler started: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start before timeout")
+	}
+	select {
+	case err = <-errs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return before timeout")
+	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("errors.Is(Run() error, context.DeadlineExceeded) = false; error = %v", err)
 	}

@@ -51,7 +51,11 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
 
-	response, err := a.client.Do(httpRequest)
+	client := *a.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := client.Do(httpRequest)
 	if err != nil {
 		if err := ctx.Err(); err != nil {
 			return agent.Result{}, err
@@ -71,6 +75,9 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return agent.Result{}, err
+		}
 		return agent.Result{}, &agent.AdapterError{
 			Kind: agent.FailureInvalidResponse,
 			Err:  fmt.Errorf("read HTTP response: %w", err),
