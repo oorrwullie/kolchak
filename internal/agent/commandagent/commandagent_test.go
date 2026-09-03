@@ -3,11 +3,14 @@ package commandagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oorrwullie/kolchak/internal/agent"
 )
@@ -42,6 +45,24 @@ func TestHelperProcess(t *testing.T) {
 		_, _ = io.WriteString(os.Stdout, `{"events":[],"output":""}{}`)
 	case "large":
 		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", maxOutputBytes+1))
+	case "exit":
+		_, _ = io.WriteString(os.Stdout, `{"events":[],"output":"secret output"}`)
+		_, _ = io.WriteString(os.Stderr, "private diagnostic")
+		os.Exit(7)
+	case "block":
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintf(os.Stderr, "arguments = %#v, want one start address", arguments)
+			os.Exit(2)
+		}
+		connection, err := net.Dial("tcp", arguments[0])
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "signal process start: %v", err)
+			os.Exit(2)
+		}
+		_ = connection.Close()
+		for {
+			time.Sleep(time.Hour)
+		}
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "unknown helper mode %q", mode)
 		os.Exit(2)
@@ -119,6 +140,70 @@ func TestRunClassifiesInvalidOutput(t *testing.T) {
 	}
 }
 
+func TestRunClassifiesStartFailure(t *testing.T) {
+	adapter, err := New([]string{"definitely-not-a-kolchak-command"})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(context.Background(), agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureUnavailable {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureUnavailable)
+	}
+}
+
+func TestRunRejectsNonzeroExit(t *testing.T) {
+	adapter, err := New(helperCommand("exit"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(context.Background(), agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureRejected {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureRejected)
+	}
+	if !strings.Contains(err.Error(), "exit status 7") {
+		t.Errorf("Run() error = %q, want exit status", err)
+	}
+	if !strings.Contains(err.Error(), "private diagnostic") {
+		t.Errorf("Run() error = %q, want stderr diagnostic", err)
+	}
+	if strings.Contains(err.Error(), "secret output") {
+		t.Errorf("Run() error = %q, must not contain stdout", err)
+	}
+}
+
+func TestRunPreservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errs := startBlockedCommand(t, ctx)
+	cancel()
+	err := waitForRunError(t, errs)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(Run() error, context.Canceled) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
+	}
+}
+
+func TestRunPreservesDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	errs := startBlockedCommand(t, ctx)
+	err := waitForRunError(t, errs)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("errors.Is(Run() error, context.DeadlineExceeded) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
+	}
+}
+
 func helperCommand(mode string) []string {
 	return []string{os.Args[0], "-test.run=TestHelperProcess", "--", mode}
 }
@@ -130,4 +215,52 @@ func helperMode(arguments []string) (string, []string, bool) {
 		}
 	}
 	return "", nil, false
+}
+
+func startBlockedCommand(t *testing.T, ctx context.Context) <-chan error {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for command start: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	adapter, err := New(append(helperCommand("block"), listener.Addr().String()))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	errs := make(chan error, 1)
+	go func() {
+		_, err := adapter.Run(ctx, agent.Request{})
+		errs <- err
+	}()
+
+	started := make(chan struct{})
+	go func() {
+		connection, err := listener.Accept()
+		if err == nil {
+			_ = connection.Close()
+		}
+		close(started)
+	}()
+	select {
+	case <-started:
+	case err := <-errs:
+		t.Fatalf("Run() returned before command started: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("command did not start")
+	}
+
+	return errs
+}
+
+func waitForRunError(t *testing.T, errs <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-errs:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return")
+		return nil
+	}
 }

@@ -54,7 +54,10 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 		return agent.Result{}, fmt.Errorf("create command stderr: %w", err)
 	}
 	if err := command.Start(); err != nil {
-		return agent.Result{}, err
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureUnavailable,
+			Err:  err,
+		}
 	}
 
 	type capturedOutput struct {
@@ -75,26 +78,30 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	if _, err := stdin.Write(request); err != nil {
 		_ = stdin.Close()
-		_ = command.Wait()
+		waitErr := command.Wait()
 		<-stdoutResult
-		<-stderrResult
+		stderrCapture := <-stderrResult
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return agent.Result{}, ctxErr
 		}
+		if waitErr != nil {
+			return agent.Result{}, rejectedError(waitErr, stderrCapture.body)
+		}
 		return agent.Result{}, fmt.Errorf("write command request: %w", err)
 	}
-	if err := stdin.Close(); err != nil {
-		return agent.Result{}, fmt.Errorf("close command stdin: %w", err)
-	}
+	closeErr := stdin.Close()
 
 	waitErr := command.Wait()
 	stdoutCapture := <-stdoutResult
-	_ = <-stderrResult
+	stderrCapture := <-stderrResult
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.Result{}, ctxErr
 	}
 	if waitErr != nil {
-		return agent.Result{}, waitErr
+		return agent.Result{}, rejectedError(waitErr, stderrCapture.body)
+	}
+	if closeErr != nil {
+		return agent.Result{}, fmt.Errorf("close command stdin: %w", closeErr)
 	}
 	if stdoutCapture.err != nil {
 		return agent.Result{}, invalidResponseError(fmt.Errorf("read command response: %w", stdoutCapture.err))
@@ -129,4 +136,18 @@ func decodeResult(body []byte) (agent.Result, error) {
 
 func invalidResponseError(err error) error {
 	return &agent.AdapterError{Kind: agent.FailureInvalidResponse, Err: err}
+}
+
+func rejectedError(err error, stderr []byte) error {
+	diagnostic := strings.TrimSpace(string(stderr))
+	if diagnostic == "" {
+		return &agent.AdapterError{
+			Kind: agent.FailureRejected,
+			Err:  fmt.Errorf("command agent exited: %w", err),
+		}
+	}
+	return &agent.AdapterError{
+		Kind: agent.FailureRejected,
+		Err:  fmt.Errorf("command agent exited: %w: %s", err, diagnostic),
+	}
 }
