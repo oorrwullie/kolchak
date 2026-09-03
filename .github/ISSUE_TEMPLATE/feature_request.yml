@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose an improvement that supports Kolchak's reliability-testing mission.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please describe the reliability-testing problem before prescribing an implementation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What maintainer or user problem should Kolchak solve? Include a concrete example when possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-outcome
+    attributes:
+      label: Proposed outcome
+      description: What should a user be able to accomplish? Focus on observable behavior rather than internal design.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How do users handle this today, and what other approaches did you consider?
+
+  - type: dropdown
+    id: release-scope
+    attributes:
+      label: Release scope
+      description: Does this appear necessary for the documented v0.1 workflow?
+      options:
+        - Required for v0.1
+        - Useful after v0.1
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add examples, prior art, diagrams, or links that clarify the request.
+
+  - type: dropdown
+    id: willing-to-contribute
+    attributes:
+      label: Willing to contribute?
+      options:
+        - Yes, I would like to help implement this
+        - Yes, I can help test or document this
+        - Not at this time
+    validations:
+      required: true
+
