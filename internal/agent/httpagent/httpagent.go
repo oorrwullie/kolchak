@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -52,13 +53,50 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	response, err := a.client.Do(httpRequest)
 	if err != nil {
-		return agent.Result{}, fmt.Errorf("send HTTP request: %w", err)
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureUnavailable,
+			Err:  err,
+		}
 	}
 	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureRejected,
+			Err:  fmt.Errorf("HTTP agent returned status %d", response.StatusCode),
+		}
+	}
+
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil {
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureInvalidResponse,
+			Err:  fmt.Errorf("read HTTP response: %w", err),
+		}
+	}
+	if len(responseBody) > maxResponseBytes {
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureInvalidResponse,
+			Err:  errors.New("HTTP agent response exceeds maximum size"),
+		}
+	}
 
 	var result agent.Result
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return agent.Result{}, fmt.Errorf("decode HTTP response: %w", err)
+	decoder := json.NewDecoder(bytes.NewReader(responseBody))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureInvalidResponse,
+			Err:  fmt.Errorf("decode HTTP response: %w", err),
+		}
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("HTTP response contains multiple JSON documents")
+		}
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureInvalidResponse,
+			Err:  fmt.Errorf("decode HTTP response: %w", err),
+		}
 	}
 	return result, nil
 }

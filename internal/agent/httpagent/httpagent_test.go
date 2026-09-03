@@ -3,12 +3,20 @@ package httpagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/oorrwullie/kolchak/internal/agent"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestNewRejectsInvalidEndpoint(t *testing.T) {
 	tests := []struct {
@@ -73,5 +81,94 @@ func TestRunExchangesJSONWithAgent(t *testing.T) {
 	}
 	if got := result.Events[0].Data["name"]; got != "verify" {
 		t.Fatalf("event data name = %#v, want %q", got, "verify")
+	}
+}
+
+func TestRunRejectsNon2xxResponseWithoutBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("secret infrastructure detail"))
+	}))
+	defer server.Close()
+
+	adapter, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(context.Background(), agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureRejected {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureRejected)
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("Run() error = %q, want status code", err)
+	}
+	if strings.Contains(err.Error(), "secret infrastructure detail") {
+		t.Errorf("Run() error = %q, must not contain response body", err)
+	}
+}
+
+func TestRunClassifiesInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "malformed", body: `{"events":`},
+		{name: "unknown field", body: `{"events":[],"output":"","extra":true}`},
+		{name: "second document", body: `{"events":[],"output":""}{}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			adapter, err := New(server.URL, nil)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			_, err = adapter.Run(context.Background(), agent.Request{})
+			kind, ok := agent.FailureKindOf(err)
+			if !ok || kind != agent.FailureInvalidResponse {
+				t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureInvalidResponse)
+			}
+		})
+	}
+}
+
+func TestRunClassifiesOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"events":[],"output":"` + strings.Repeat("x", maxResponseBytes) + `"}`))
+	}))
+	defer server.Close()
+
+	adapter, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(context.Background(), agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureInvalidResponse {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureInvalidResponse)
+	}
+}
+
+func TestRunClassifiesTransportFailure(t *testing.T) {
+	client := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})}
+	adapter, err := New("https://agent.example", client)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(context.Background(), agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureUnavailable {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureUnavailable)
 	}
 }
