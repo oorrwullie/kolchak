@@ -33,8 +33,8 @@ Today, Kolchak can:
 - create local directories for runs, discovered failures, and accepted cases;
 - reject accidental reinitialization of an existing project;
 - validate HTTP and explicit command-argument agent configurations;
-- exchange bounded, strict JSON with HTTP and local-command agents through the
-  internal adapter packages;
+- exchange strict JSON with HTTP and local-command agents, applying output-size
+  limits in the internal agent adapter packages;
 - build and test through the repository's GitHub Actions workflow.
 
 The broader design, examples, and planned behavior are documented in
