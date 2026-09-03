@@ -37,6 +37,15 @@ func TestFailureKindOfDoesNotClassifyCancellation(t *testing.T) {
 	}
 }
 
+func TestFailureKindOfDoesNotClassifyTypedNil(t *testing.T) {
+	var adapterErr *AdapterError
+	var err error = adapterErr
+
+	if kind, ok := FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf() = %q, true; want no adapter classification", kind)
+	}
+}
+
 func TestAdapterErrorWithoutCause(t *testing.T) {
 	err := (&AdapterError{Kind: FailureRejected}).Error()
 	if want := "agent adapter rejected"; err != want {

@@ -44,7 +44,7 @@ func (e *AdapterError) Unwrap() error {
 // FailureKindOf reports the normalized kind of an adapter failure.
 func FailureKindOf(err error) (FailureKind, bool) {
 	var adapterErr *AdapterError
-	if !errors.As(err, &adapterErr) {
+	if !errors.As(err, &adapterErr) || adapterErr == nil {
 		return "", false
 	}
 	return adapterErr.Kind, true
