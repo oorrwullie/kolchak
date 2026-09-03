@@ -1,10 +1,14 @@
 package project
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/oorrwullie/kolchak/internal/config"
 )
 
 func TestInitCreatesProject(t *testing.T) {
@@ -25,6 +29,37 @@ func TestInitCreatesProject(t *testing.T) {
 		if err != nil || !info.IsDir() {
 			t.Errorf("expected directory %s", name)
 		}
+	}
+}
+
+func TestInitConfigRoundTrip(t *testing.T) {
+	firstDir := filepath.Join(t.TempDir(), "first")
+	secondDir := filepath.Join(t.TempDir(), "second")
+	for _, dir := range []string{firstDir, secondDir} {
+		if err := Init(dir); err != nil {
+			t.Fatalf("Init(%q): %v", dir, err)
+		}
+	}
+
+	firstPath := filepath.Join(firstDir, ConfigName)
+	cfg, err := config.Load(firstPath)
+	if err != nil {
+		t.Fatalf("load generated config: %v", err)
+	}
+	if want := config.Default(); !reflect.DeepEqual(cfg, want) {
+		t.Fatalf("generated config = %#v, want %#v", cfg, want)
+	}
+
+	first, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(filepath.Join(secondDir, ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("generated configuration is not deterministic:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
 }
 
