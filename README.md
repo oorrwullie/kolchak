@@ -172,7 +172,7 @@ one job:
 > Find ways an agent can behave incorrectly under failure, reduce those
 > failures to reproducible cases, and make sure they stay fixed.
 
-## Why "Kolchak"?
+## Why the name "Kolchak"?
 
 The name is a nod to **Carl Kolchak**, the investigative reporter from the
 1970s cult series *Kolchak: The Night Stalker*.
