@@ -49,6 +49,23 @@ func TestHelperProcess(t *testing.T) {
 		_, _ = io.WriteString(os.Stdout, `{"events":[],"output":"secret output"}`)
 		_, _ = io.WriteString(os.Stderr, "private diagnostic")
 		os.Exit(7)
+	case "write-failure":
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintf(os.Stderr, "arguments = %#v, want one control address", arguments)
+			os.Exit(2)
+		}
+		connection, err := net.Dial("tcp", arguments[0])
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "connect for write failure: %v", err)
+			os.Exit(2)
+		}
+		defer func() { _ = connection.Close() }()
+		if _, err := connection.Read(make([]byte, 1)); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "wait for write failure: %v", err)
+			os.Exit(2)
+		}
+		_ = os.Stdin.Close()
+		os.Exit(7)
 	case "block":
 		if len(arguments) != 1 {
 			_, _ = fmt.Fprintf(os.Stderr, "arguments = %#v, want one start address", arguments)
@@ -153,6 +170,24 @@ func TestRunClassifiesStartFailure(t *testing.T) {
 	}
 }
 
+func TestRunPreservesAlreadyCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	adapter, err := New(helperCommand("success"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = adapter.Run(ctx, agent.Request{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(Run() error, context.Canceled) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
+	}
+}
+
 func TestRunRejectsNonzeroExit(t *testing.T) {
 	adapter, err := New(helperCommand("exit"))
 	if err != nil {
@@ -172,6 +207,44 @@ func TestRunRejectsNonzeroExit(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret output") {
 		t.Errorf("Run() error = %q, must not contain stdout", err)
+	}
+}
+
+func TestRunClassifiesRequestWriteFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for write failure: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	adapter, err := New(append(helperCommand("write-failure"), listener.Addr().String()))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	errs := make(chan error, 1)
+	go func() {
+		_, err := adapter.Run(context.Background(), agent.Request{Task: strings.Repeat("x", 8<<20)})
+		errs <- err
+	}()
+	connection, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("accept write-failure control connection: %v", err)
+	}
+	_, _ = connection.Write([]byte{1})
+	_ = connection.Close()
+
+	err = waitForRunError(t, errs)
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureUnavailable {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureUnavailable)
+	}
+}
+
+func TestRejectedErrorBoundsStderrDiagnostic(t *testing.T) {
+	diagnostic := strings.Repeat("z", maxOutputBytes+1)
+	err := rejectedError(errors.New("exit status 7"), []byte(diagnostic))
+	if got := strings.Count(err.Error(), "z"); got != maxOutputBytes {
+		t.Errorf("rejectedError() diagnostic bytes = %d, want %d", got, maxOutputBytes)
 	}
 }
 

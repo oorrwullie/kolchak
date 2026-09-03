@@ -35,6 +35,10 @@ func New(argv []string) (*Adapter, error) {
 
 // Run sends req to the command and returns its JSON result.
 func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.Result{}, err
+	}
+
 	request, err := json.Marshal(req)
 	if err != nil {
 		return agent.Result{}, fmt.Errorf("marshal agent request: %w", err)
@@ -47,13 +51,22 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return agent.Result{}, fmt.Errorf("create command stdout: %w", err)
 	}
 	stderr, err := command.StderrPipe()
 	if err != nil {
+		_ = stdout.Close()
+		_ = stdin.Close()
 		return agent.Result{}, fmt.Errorf("create command stderr: %w", err)
 	}
 	if err := command.Start(); err != nil {
+		_ = stderr.Close()
+		_ = stdout.Close()
+		_ = stdin.Close()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return agent.Result{}, ctxErr
+		}
 		return agent.Result{}, &agent.AdapterError{
 			Kind: agent.FailureUnavailable,
 			Err:  err,
@@ -78,16 +91,16 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	if _, err := stdin.Write(request); err != nil {
 		_ = stdin.Close()
-		waitErr := command.Wait()
+		_ = command.Wait()
 		<-stdoutResult
-		stderrCapture := <-stderrResult
+		<-stderrResult
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return agent.Result{}, ctxErr
 		}
-		if waitErr != nil {
-			return agent.Result{}, rejectedError(waitErr, stderrCapture.body)
+		return agent.Result{}, &agent.AdapterError{
+			Kind: agent.FailureUnavailable,
+			Err:  fmt.Errorf("write command request: %w", err),
 		}
-		return agent.Result{}, fmt.Errorf("write command request: %w", err)
 	}
 	closeErr := stdin.Close()
 
@@ -139,6 +152,9 @@ func invalidResponseError(err error) error {
 }
 
 func rejectedError(err error, stderr []byte) error {
+	if len(stderr) > maxOutputBytes {
+		stderr = stderr[:maxOutputBytes]
+	}
 	diagnostic := strings.TrimSpace(string(stderr))
 	if diagnostic == "" {
 		return &agent.AdapterError{
