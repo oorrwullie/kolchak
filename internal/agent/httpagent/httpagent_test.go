@@ -25,12 +25,36 @@ type readSignalBody struct {
 	readStarted chan<- struct{}
 }
 
+const testWaitTimeout = 2 * time.Second
+
 func (b *readSignalBody) Read(p []byte) (int, error) {
 	select {
 	case b.readStarted <- struct{}{}:
 	default:
 	}
 	return b.ReadCloser.Read(p)
+}
+
+func waitForStage(t *testing.T, stage string, signal <-chan struct{}, errs <-chan error) {
+	t.Helper()
+	select {
+	case <-signal:
+	case err := <-errs:
+		t.Fatalf("Run() returned before %s: %v", stage, err)
+	case <-time.After(testWaitTimeout):
+		t.Fatalf("timed out waiting for %s", stage)
+	}
+}
+
+func waitForRunError(t *testing.T, errs <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-errs:
+		return err
+	case <-time.After(testWaitTimeout):
+		t.Fatal("timed out waiting for Run() to return")
+		return nil
+	}
 }
 
 func TestNewRejectsInvalidEndpoint(t *testing.T) {
@@ -99,7 +123,7 @@ func TestRunExchangesJSONWithAgent(t *testing.T) {
 	}
 }
 
-func TestRunRejectsNon2xxResponseWithoutBody(t *testing.T) {
+func TestRunRejectsNon2xxResponseWithoutDisclosingBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("secret infrastructure detail"))
@@ -259,9 +283,9 @@ func TestRunPreservesCancellation(t *testing.T) {
 		_, err := adapter.Run(ctx, agent.Request{})
 		errs <- err
 	}()
-	<-started
+	waitForStage(t, "handler start", started, errs)
 	cancel()
-	err = <-errs
+	err = waitForRunError(t, errs)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("errors.Is(Run() error, context.Canceled) = false; error = %v", err)
 	}
@@ -300,10 +324,10 @@ func TestRunPreservesCancellationDuringResponseBodyRead(t *testing.T) {
 		_, err := adapter.Run(ctx, agent.Request{})
 		errs <- err
 	}()
-	<-headersFlushed
-	<-bodyReadStarted
+	waitForStage(t, "response headers", headersFlushed, errs)
+	waitForStage(t, "response body read", bodyReadStarted, errs)
 	cancel()
-	err = <-errs
+	err = waitForRunError(t, errs)
 	if !errors.Is(err, ctx.Err()) {
 		t.Fatalf("errors.Is(Run() error, ctx.Err()) = false; error = %v", err)
 	}
