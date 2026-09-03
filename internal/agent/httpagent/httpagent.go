@@ -53,12 +53,15 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	response, err := a.client.Do(httpRequest)
 	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return agent.Result{}, err
+		}
 		return agent.Result{}, &agent.AdapterError{
 			Kind: agent.FailureUnavailable,
 			Err:  err,
 		}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return agent.Result{}, &agent.AdapterError{
 			Kind: agent.FailureRejected,

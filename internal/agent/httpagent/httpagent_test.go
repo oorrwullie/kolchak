@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oorrwullie/kolchak/internal/agent"
 )
@@ -170,5 +171,76 @@ func TestRunClassifiesTransportFailure(t *testing.T) {
 	kind, ok := agent.FailureKindOf(err)
 	if !ok || kind != agent.FailureUnavailable {
 		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureUnavailable)
+	}
+}
+
+func TestRunPreservesCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	adapter, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errs := make(chan error, 1)
+	go func() {
+		_, err := adapter.Run(ctx, agent.Request{})
+		errs <- err
+	}()
+	<-started
+	cancel()
+	err = <-errs
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(Run() error, context.Canceled) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
+	}
+}
+
+func TestRunPreservesDeadline(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	adapter, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	errs := make(chan error, 1)
+	go func() {
+		_, err := adapter.Run(ctx, agent.Request{})
+		errs <- err
+	}()
+	<-started
+	err = <-errs
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("errors.Is(Run() error, context.DeadlineExceeded) = false; error = %v", err)
+	}
+	if kind, ok := agent.FailureKindOf(err); ok {
+		t.Fatalf("FailureKindOf(Run() error) = %q, true; want no adapter classification", kind)
 	}
 }
