@@ -19,8 +19,9 @@ type Config struct {
 }
 
 type Agent struct {
-	Type string `yaml:"type"`
-	URL  string `yaml:"url"`
+	Type    string   `yaml:"type"`
+	URL     string   `yaml:"url"`
+	Command []string `yaml:"command"`
 }
 
 type Tests struct {

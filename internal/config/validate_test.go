@@ -35,7 +35,7 @@ func TestValidateReportsEveryInvalidPath(t *testing.T) {
 	}
 	want := []string{
 		"version",
-		"agent.type",
+		"agent.command",
 		"tests.inputs[0]",
 		"faults[0]",
 		"faults[1]",
@@ -78,6 +78,37 @@ func TestValidateHTTPAgent(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), "agent.url:") || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Validate() = %v, want agent.url error containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateCommandAgent(t *testing.T) {
+	tests := []struct {
+		name    string
+		command []string
+		want    string
+	}{
+		{name: "missing", want: "is required for the command adapter"},
+		{name: "blank executable", command: []string{" "}, want: "agent.command[0]: must not be empty"},
+		{name: "blank argument", command: []string{"agent", " "}, want: "agent.command[1]: must not be empty"},
+		{name: "valid", command: []string{"agent", "--stdio"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Agent = Agent{Type: "command", Command: tt.command}
+
+			err := cfg.Validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.want)
 			}
 		})
 	}
