@@ -69,5 +69,9 @@ func Load(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("decode config %q: multiple YAML documents are not supported", path)
 	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fmt.Errorf("validate config %q: %w", path, err)
+	}
+
 	return cfg, nil
 }
