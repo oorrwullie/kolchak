@@ -47,18 +47,18 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 	command := exec.CommandContext(ctx, a.argv[0], a.argv[1:]...)
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return agent.Result{}, fmt.Errorf("create command stdin: %w", err)
+		return agent.Result{}, unavailableError(fmt.Errorf("create command stdin: %w", err))
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
-		return agent.Result{}, fmt.Errorf("create command stdout: %w", err)
+		return agent.Result{}, unavailableError(fmt.Errorf("create command stdout: %w", err))
 	}
 	stderr, err := command.StderrPipe()
 	if err != nil {
 		_ = stdout.Close()
 		_ = stdin.Close()
-		return agent.Result{}, fmt.Errorf("create command stderr: %w", err)
+		return agent.Result{}, unavailableError(fmt.Errorf("create command stderr: %w", err))
 	}
 	if err := command.Start(); err != nil {
 		_ = stderr.Close()
@@ -67,10 +67,7 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return agent.Result{}, ctxErr
 		}
-		return agent.Result{}, &agent.AdapterError{
-			Kind: agent.FailureUnavailable,
-			Err:  err,
-		}
+		return agent.Result{}, unavailableError(err)
 	}
 
 	type capturedOutput struct {
@@ -89,7 +86,7 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 		stderrResult <- capturedOutput{body: body, exceeded: exceeded, err: err}
 	}()
 
-	if _, err := stdin.Write(request); err != nil {
+	if err := writeAll(stdin, request); err != nil {
 		_ = stdin.Close()
 		<-stdoutResult
 		<-stderrResult
@@ -97,10 +94,7 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return agent.Result{}, ctxErr
 		}
-		return agent.Result{}, &agent.AdapterError{
-			Kind: agent.FailureUnavailable,
-			Err:  fmt.Errorf("write command request: %w", err),
-		}
+		return agent.Result{}, unavailableError(fmt.Errorf("write command request: %w", err))
 	}
 	closeErr := stdin.Close()
 
@@ -162,6 +156,15 @@ func decodeResult(body []byte) (agent.Result, error) {
 
 func invalidResponseError(err error) error {
 	return &agent.AdapterError{Kind: agent.FailureInvalidResponse, Err: err}
+}
+
+func unavailableError(err error) error {
+	return &agent.AdapterError{Kind: agent.FailureUnavailable, Err: err}
+}
+
+func writeAll(writer io.Writer, body []byte) error {
+	_, err := io.Copy(writer, bytes.NewReader(body))
+	return err
 }
 
 func rejectedError(err error, stderr []byte) error {

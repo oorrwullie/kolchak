@@ -108,6 +108,21 @@ func TestNewRejectsInvalidCommand(t *testing.T) {
 	}
 }
 
+func TestWriteAllRejectsShortWrite(t *testing.T) {
+	err := writeAll(shortWriter{}, []byte("request"))
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeAll() error = %v, want io.ErrShortWrite", err)
+	}
+}
+
+func TestUnavailableErrorClassifiesSetupFailure(t *testing.T) {
+	err := unavailableError(errors.New("create command stdout"))
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureUnavailable {
+		t.Fatalf("FailureKindOf(unavailableError()) = %q, %t; want %q, true", kind, ok, agent.FailureUnavailable)
+	}
+}
+
 func TestRunExchangesJSONWithCommand(t *testing.T) {
 	adapter, err := New(append(helperCommand("success"), "--stdio"))
 	if err != nil {
@@ -353,4 +368,10 @@ func waitForRunError(t *testing.T, errs <-chan error) error {
 		t.Fatal("Run() did not return")
 		return nil
 	}
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(body []byte) (int, error) {
+	return len(body) - 1, nil
 }
