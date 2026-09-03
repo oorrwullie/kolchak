@@ -68,6 +68,23 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadCommandAgent(t *testing.T) {
+	path := writeConfig(t, `agent:
+  type: command
+  command: [agent, --stdio]
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"agent", "--stdio"}
+	if len(cfg.Agent.Command) != len(want) || cfg.Agent.Command[0] != want[0] || cfg.Agent.Command[1] != want[1] {
+		t.Errorf("Agent.Command = %#v, want %#v", cfg.Agent.Command, want)
+	}
+}
+
 func TestLoadMalformedYAML(t *testing.T) {
 	path := writeConfig(t, "agent: [\n")
 

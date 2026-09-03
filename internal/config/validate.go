@@ -35,8 +35,10 @@ func (c Config) Validate() error {
 		validation.add("agent.type", "is required")
 	case "http":
 		validateHTTPAgent(&validation, c.Agent)
+	case "command":
+		validateCommandAgent(&validation, c.Agent)
 	default:
-		validation.add("agent.type", fmt.Sprintf("unsupported adapter %q; must be http", c.Agent.Type))
+		validation.add("agent.type", fmt.Sprintf("unsupported adapter %q; must be http or command", c.Agent.Type))
 	}
 
 	if len(c.Tests.Inputs) == 0 {
@@ -73,6 +75,19 @@ func validateHTTPAgent(validation *ValidationError, agent Agent) {
 	parsed, err := url.Parse(agent.URL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		validation.add("agent.url", "must be an absolute http or https URL")
+	}
+}
+
+func validateCommandAgent(validation *ValidationError, agent Agent) {
+	if len(agent.Command) == 0 {
+		validation.add("agent.command", "is required for the command adapter")
+		return
+	}
+
+	for i, argument := range agent.Command {
+		if strings.TrimSpace(argument) == "" {
+			validation.add(fmt.Sprintf("agent.command[%d]", i), "must not be empty")
+		}
 	}
 }
 
