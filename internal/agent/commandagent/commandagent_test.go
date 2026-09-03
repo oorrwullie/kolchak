@@ -45,6 +45,8 @@ func TestHelperProcess(t *testing.T) {
 		_, _ = io.WriteString(os.Stdout, `{"events":[],"output":""}{}`)
 	case "large":
 		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", maxOutputBytes+1))
+	case "huge":
+		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", 8<<20))
 	case "exit":
 		_, _ = io.WriteString(os.Stdout, `{"events":[],"output":"secret output"}`)
 		_, _ = io.WriteString(os.Stderr, "private diagnostic")
@@ -154,6 +156,21 @@ func TestRunClassifiesInvalidOutput(t *testing.T) {
 				t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureInvalidResponse)
 			}
 		})
+	}
+}
+
+func TestRunDrainsOversizedOutput(t *testing.T) {
+	adapter, err := New(helperCommand("huge"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err = adapter.Run(ctx, agent.Request{})
+	kind, ok := agent.FailureKindOf(err)
+	if !ok || kind != agent.FailureInvalidResponse {
+		t.Fatalf("FailureKindOf(Run() error) = %q, %t; want %q, true", kind, ok, agent.FailureInvalidResponse)
 	}
 }
 

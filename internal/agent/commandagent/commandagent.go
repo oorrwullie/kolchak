@@ -91,9 +91,9 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 
 	if _, err := stdin.Write(request); err != nil {
 		_ = stdin.Close()
-		_ = command.Wait()
 		<-stdoutResult
 		<-stderrResult
+		_ = command.Wait()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return agent.Result{}, ctxErr
 		}
@@ -104,9 +104,9 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 	}
 	closeErr := stdin.Close()
 
-	waitErr := command.Wait()
 	stdoutCapture := <-stdoutResult
 	stderrCapture := <-stderrResult
+	waitErr := command.Wait()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.Result{}, ctxErr
 	}
@@ -127,8 +127,21 @@ func (a *Adapter) Run(ctx context.Context, req agent.Request) (agent.Result, err
 }
 
 func readBounded(reader io.Reader) ([]byte, bool, error) {
-	body, err := io.ReadAll(io.LimitReader(reader, maxOutputBytes+1))
-	return body, len(body) > maxOutputBytes, err
+	body, err := io.ReadAll(io.LimitReader(reader, maxOutputBytes))
+	if err != nil {
+		return body, false, err
+	}
+
+	extra, err := io.ReadAll(io.LimitReader(reader, 1))
+	if err != nil {
+		return body, false, err
+	}
+	if len(extra) == 0 {
+		return body, false, nil
+	}
+
+	_, err = io.Copy(io.Discard, reader)
+	return body, true, err
 }
 
 func decodeResult(body []byte) (agent.Result, error) {
