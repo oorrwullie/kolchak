@@ -14,6 +14,12 @@ func TestGitHubContributionTemplates(t *testing.T) {
 		t.Fatal("locate test file")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+	if _, err := os.Stat(filepath.Join(root, ".github")); err != nil {
+		if os.IsNotExist(err) {
+			t.Skip("GitHub metadata is not included in this source distribution")
+		}
+		t.Fatalf("stat GitHub metadata directory: %v", err)
+	}
 
 	tests := []struct {
 		path     string
@@ -60,7 +66,7 @@ func TestGitHubContributionTemplates(t *testing.T) {
 				"## Testing",
 				"## Compatibility and configuration",
 				"## Checklist",
-				"Test` check passes",
+				"- [ ] The required `Test` check passes.",
 			},
 		},
 	}
