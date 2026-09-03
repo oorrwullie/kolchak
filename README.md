@@ -23,14 +23,18 @@ verification becomes unavailable.
 ## Status
 
 > [!IMPORTANT]
-> Kolchak is in early development. Only project initialization is implemented;
-> the testing and replay commands below describe the intended v0.1 workflow.
+> Kolchak is in early development. Project initialization and the HTTP and
+> command/subprocess adapter foundations are implemented; the testing and
+> replay commands below describe the intended v0.1 workflow.
 
 Today, Kolchak can:
 
 - create a starter `kolchak.yaml` with `kolchak init`;
 - create local directories for runs, discovered failures, and accepted cases;
 - reject accidental reinitialization of an existing project;
+- validate HTTP and explicit command-argument agent configurations;
+- exchange strict JSON with HTTP and local-command agents, applying output-size
+  limits in the internal agent adapter packages;
 - build and test through the repository's GitHub Actions workflow.
 
 The broader design, examples, and planned behavior are documented in
@@ -168,13 +172,31 @@ one job:
 > Find ways an agent can behave incorrectly under failure, reduce those
 > failures to reproducible cases, and make sure they stay fixed.
 
-## Name
+## Why the name "Kolchak"?
 
-The name is a nod to Carl Kolchak, the investigative reporter from the 1970s
-cult series *Kolchak: The Night Stalker*. He kept investigating when the
-accepted explanation did not match the evidence.
+The name is a nod to **Carl Kolchak**, the investigative reporter from the
+1970s cult series *Kolchak: The Night Stalker*.
 
-**Kolchak is the investigator. Your agent is the witness. The evidence decides.**
+Kolchak had a habit of investigating cases where the accepted explanation
+didn't match the evidence. He kept digging until he found what actually
+happened.
+
+That's a pretty good description of the job this project is meant to do.
+
+An AI agent says it completed the task successfully. Kolchak doesn't take the
+claim at face value. It changes the environment, follows the evidence,
+reproduces what went wrong, and reduces the failure to a case you can keep.
+
+There's some extra nerd pedigree, too: *Kolchak: The Night Stalker* was an
+important inspiration for Chris Carter when he created *The X-Files*.
+
+And, appropriately enough, one episode of *Kolchak* involved an
+artificial-intelligence-equipped robot behaving rather badly.
+
+Knowing any of that is entirely optional.
+
+**Kolchak is the investigator. Your agent is the witness. The evidence
+decides.**
 
 ## License
 
